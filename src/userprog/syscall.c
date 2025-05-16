@@ -35,7 +35,6 @@ syscall_handler (struct intr_frame *f UNUSED)
   int esp = convert_to_physical((void *) f->esp);
   int syscall_number = *(int *) esp;
   int args[3];
-  get_arguments(f, args, 3);
 
   switch (syscall_number)
   {
@@ -43,13 +42,14 @@ syscall_handler (struct intr_frame *f UNUSED)
     shutdown_power_off();
     break;
   case SYS_EXIT:
+  get_arguments(f, args, 1);
     terminate( (int *) args[0]);
     break;
-  case SYS_EXEC: {
-    char* file_name = get_parameter_string(f->esp, 4);
+  case SYS_EXEC: 
+    get_arguments(f, args, 1);
+    char* file_name = (char *) args[0];
     process_execute(file_name);
     break;
-}
   case SYS_WAIT:{
     // get pid 
     int * parameter = (int *) args[0];
@@ -88,7 +88,7 @@ void terminate(int status){
   struct thread *cur = thread_current();
   cur->exit_status = status;
   printf("%s: exit(%d)\n", cur->name, status);
-  thread_exit();
+  process_exit();
 }
 void validate(const void *ptr){
   if (ptr == NULL || !is_user_vaddr(ptr)){
@@ -103,11 +103,6 @@ int convert_to_physical(const void *ptr){
   }else {
     return (int) page;
   }
-}
-char* get_parameter_string(void *esp, int offset) {
-  validate((char *)(esp + offset));
-  int address = convert_to_physical((char *)(esp + offset));
-  return (char *) address;
 }
 
 void get_arguments (struct intr_frame *f, int *args, int num_args) {

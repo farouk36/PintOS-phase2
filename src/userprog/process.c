@@ -133,6 +133,16 @@ process_exit (void)
 	struct thread *cur = thread_current ();
 	uint32_t *pd;
 
+	tid_t tid = cur->tid;
+
+	// remove files
+
+	if(cur->parent !=NULL && cur->parent->waiting_on == tid){
+		cur->parent->waiting_on = -1;
+		cur->parent->exit_status = cur->exit_status;
+		sema_up(cur->parent->wait_connection);
+	}
+
 	/* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
 	pd = cur->pagedir;
@@ -149,6 +159,7 @@ process_exit (void)
 		pagedir_activate (NULL);
 		pagedir_destroy (pd);
 	}
+	thread_exit();
 }
 
 /* Sets up the CPU for running user code in the current
