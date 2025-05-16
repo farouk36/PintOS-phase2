@@ -18,6 +18,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+
+
 /* Used for setup_stack */
 static void push_stack(int order, void **esp, char *token, char **argv, int argc);
 
@@ -44,9 +46,10 @@ process_execute (const char *file_name)
 	/* Parsed file name */
 	char *save_ptr;
 	file_name = strtok_r((char *) file_name, " ", &save_ptr);
-
+    
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+	sema_down(thread_current()->wait_connection);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -71,7 +74,11 @@ start_process (void *file_name_)
 	if_.cs = SEL_UCSEG;
 	if_.eflags = FLAG_IF | FLAG_MBS;
 	success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
-
+    thread_current()->parent->child_creation_success = success;
+	sema_up(thread_current()->parent->wait_connection);
+	if(success){
+		sema_down(thread_current()->parent->wait_connection);
+	}
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
 	if (!success)

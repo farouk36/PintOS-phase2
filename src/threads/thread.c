@@ -172,6 +172,7 @@ thread_create (const char *name, int priority,
 	struct switch_threads_frame *sf;
 	tid_t tid;
 	enum intr_level old_level;
+	
 
 	ASSERT (function != NULL);
 
@@ -184,7 +185,11 @@ thread_create (const char *name, int priority,
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 	t->exit_status=-1;
-
+    struct child_process *ch;
+	ch->pid = tid;
+	ch->t = t;
+	list_push_back(thread_current()->children,ch);
+	ch->t->parent = thread_current();
 	/* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
      member cannot be observed. */
@@ -206,7 +211,7 @@ thread_create (const char *name, int priority,
 	sf->ebp = 0;
 
 	intr_set_level (old_level);
-
+    
 	/* Add to run queue. */
 	thread_unblock (t);
 
