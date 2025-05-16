@@ -94,7 +94,8 @@ struct thread
     struct list *children;              /* List element for ready list. */
     struct thread *parent;               /* Parent thread. */
     bool child_creation_success;
-    struct semaphore *wait_connection;       //  struct semaphore *wait_parent;
+    struct semaphore *load_sema;       //  struct semaphore *load_sema;
+    struct semaphore *exit_sema;        // struct semaphore *exit_sema;
     tid_t waiting_on;
     int fd_last;
     struct file *fd_table[128];         /* File descriptor table. */

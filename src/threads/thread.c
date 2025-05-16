@@ -184,12 +184,19 @@ thread_create (const char *name, int priority,
 	/* Initialize thread. */
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
-	t->exit_status=-1;
-    struct child_process *ch;
+	t->exit_status = -1;
+	t->status = THREAD_BLOCKED;  // Explicitly set initial status
+    
+	struct child_process *ch = palloc_get_page (PAL_ZERO);
+	if (ch == NULL) {
+		palloc_free_page (t);
+		return TID_ERROR;
+	}
 	ch->pid = tid;
 	ch->t = t;
-	list_push_back(thread_current()->children,ch);
+	list_push_back(&thread_current()->children, &ch->elem);  // Fix: add &ch->elem
 	ch->t->parent = thread_current();
+
 	/* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
      member cannot be observed. */
@@ -213,7 +220,7 @@ thread_create (const char *name, int priority,
 	intr_set_level (old_level);
     
 	/* Add to run queue. */
-	thread_unblock (t);
+	thread_unblock (t);  // This will change status to THREAD_READY
 
 	return tid;
 }
@@ -245,15 +252,15 @@ thread_block (void)
 void
 thread_unblock (struct thread *t) 
 {
-	enum intr_level old_level;
+    enum intr_level old_level;
 
-	ASSERT (is_thread (t));
+    ASSERT (is_thread (t));
 
-	old_level = intr_disable ();
-	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
-	t->status = THREAD_READY;
-	intr_set_level (old_level);
+    old_level = intr_disable ();
+    ASSERT (t->status == THREAD_BLOCKED);
+    list_push_back (&ready_list, &t->elem);
+    t->status = THREAD_READY;
+    intr_set_level (old_level);
 }
 
 /* Returns the name of the running thread. */
@@ -269,17 +276,13 @@ thread_name (void)
 struct thread *
 thread_current (void) 
 {
-	struct thread *t = running_thread ();
-
-	/* Make sure T is really a thread.
-     If either of these assertions fire, then your thread may
-     have overflowed its stack.  Each thread has less than 4 kB
-     of stack, so a few big automatic arrays or moderate
-     recursion can cause stack overflow. */
-	ASSERT (is_thread (t));
-	ASSERT (t->status == THREAD_RUNNING);
-
-	return t;
+  struct thread *t = running_thread ();
+  
+  /* Make sure T is really a thread */
+  ASSERT (is_thread (t));
+  ASSERT (t->status == THREAD_RUNNING || t->status == THREAD_DYING);
+  
+  return t;
 }
 
 /* Returns the running thread's tid. */
@@ -477,6 +480,24 @@ init_thread (struct thread *t, const char *name, int priority)
 	t->stack = (uint8_t *) t + PGSIZE;
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	t->parent = NULL;
+	t->children = malloc(sizeof(struct list));
+	list_init(t->children);
+	t->load_sema = malloc(sizeof(struct semaphore));
+	sema_init(t->load_sema, 0);
+	t->exit_sema = malloc(sizeof(struct semaphore));
+	sema_init(t->exit_sema, 0);
+	t->fd_last = 2; // Start after stdin/stdout
+	t->open_files = malloc(sizeof(struct list));
+	list_init(t->open_files);
+	t->locks_held = malloc(sizeof(struct list));
+	list_init(t->locks_held);
+	t->exit_status = -1;
+	t->waiting_on = -1;
+
+	// Initialize file descriptor table
+	memset(t->fd_table, 0, sizeof(t->fd_table));
 
 	old_level = intr_disable ();
 	list_push_back (&all_list, &t->allelem);

@@ -32,6 +32,22 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp, char** s
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
+
+struct thread* get_Child (tid_t id){
+	struct list_elem *e;
+	struct child_process *child = NULL;
+	struct thread *cur = thread_current();
+
+	// Find child in children list
+	for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
+		child = list_entry(e, struct child_process, elem);
+		if (child->pid == id) {
+			return child->t;
+		}
+	}
+	return NULL;
+}
+
 tid_t
 process_execute (const char *file_name) 
 {
@@ -50,7 +66,11 @@ process_execute (const char *file_name)
     
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-	sema_down(thread_current()->wait_connection);
+	struct thread *child_thread = get_Child(tid);
+	if(child_thread != NULL){
+		sema_down(child_thread->load_sema);
+	}
+	
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -61,40 +81,38 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
-	char *file_name = file_name_;
-	struct intr_frame if_;
-	bool success;
+  char *file_name = file_name_;
+  struct intr_frame if_;
+  bool success;
 
-	/* the first token is file name */
-	char *save_ptr;
-	file_name = strtok_r(file_name, " ", &save_ptr);
+  /* the first token is file name */
+  char *save_ptr;
+  file_name = strtok_r(file_name, " ", &save_ptr);
 
-	/* Initialize interrupt frame and load executable. */
-	memset (&if_, 0, sizeof if_);
-	if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-	if_.cs = SEL_UCSEG;
-	if_.eflags = FLAG_IF | FLAG_MBS;
-	success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
+  /* Initialize interrupt frame and load executable. */
+  memset (&if_, 0, sizeof if_);
+  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+  if_.cs = SEL_UCSEG;
+  if_.eflags = FLAG_IF | FLAG_MBS;
+  
+  success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
+  
+  // Signal parent about load result
+  if (thread_current()->parent != NULL) {
     thread_current()->parent->child_creation_success = success;
-	sema_up(thread_current()->parent->wait_connection);
-	if(success){
-		sema_down(thread_current()->parent->wait_connection);
-	}else {
-		thread_exit();
-	}
-	/* If load failed, quit. */
-	palloc_free_page (file_name);
-	if (!success)
-		thread_exit ();
+    sema_up(thread_current()->load_sema);
+  }
 
-	/* Start the user process by simulating a return from an
-     interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S).  Because intr_exit takes all of its
-     arguments on the stack in the form of a `struct intr_frame',
-     we just point the stack pointer (%esp) to our stack frame
-     and jump to it. */
-	asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
-	NOT_REACHED ();
+  /* If load failed, quit. */
+  palloc_free_page (file_name);
+  if (!success) {
+    thread_exit();
+    NOT_REACHED();
+  }
+
+  /* Start the user process */
+  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+  NOT_REACHED ();
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -111,58 +129,80 @@ process_wait (tid_t child_tid UNUSED)
 {
   struct list_elem *e;
   struct child_process *child = NULL;
-  
-  for (e = list_begin(&thread_current()->children); e != list_end(&thread_current()->children); e = list_next(e)) {
+  struct thread *cur = thread_current();
+
+  // Find child in children list
+  for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
     child = list_entry(e, struct child_process, elem);
     if (child->pid == child_tid) {
-      struct list_elem *X = list_remove(child);	 
+      list_remove(&child->elem);
       break;
     }
   }
-  if (e == list_end(&thread_current()->children)) {
+
+  // Child not found or already waited on
+  if (child == NULL)
     return -1;
-  }
-  thread_current()->waiting_on = child_tid;
-  sema_down(child->t->parent->wait_connection);
-  sema_up(child->t->wait_connection);
-	return child->t->exit_status;
+
+  // Wait for child to exit
+  cur->waiting_on = child_tid;
+  struct thread *child_thread = get_Child(child_tid);
+  sema_down(child_thread->exit_sema);
+  
+  int status = child->t->exit_status;
+  free(child);
+  
+  return status;
 }
 
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
-	struct thread *cur = thread_current ();
-	uint32_t *pd;
+  struct thread *cur = thread_current();
+  
+  // Close all open files
+  struct list_elem *e;
+  while (!list_empty(cur->open_files)) {
+    e = list_pop_front(cur->open_files);
+    struct open_file *of = list_entry(e, struct open_file, elem);
+    file_close(of->file);
+    free(of);
+  }
+  
+  // Free lists
+  free(cur->open_files);
+  free(cur->locks_held);
+  free(cur->children);
+  free(cur->load_sema);
+  free(cur->exit_sema);
 
-	tid_t tid = cur->tid;
+  // Signal parent if it's waiting
+  if (cur->parent != NULL && cur->parent->waiting_on == cur->tid) {
+    sema_up(cur->exit_sema);
+  }
+  
+  uint32_t *pd;
 
-	// remove files
-	
+  tid_t tid = cur->tid;
 
-	if(cur->parent !=NULL && cur->parent->waiting_on == tid){
-		cur->parent->waiting_on = -1;
-		cur->parent->exit_status = cur->exit_status;
-		sema_up(cur->parent->wait_connection);
-	}
-
-	/* Destroy the current process's page directory and switch back
+  /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-	pd = cur->pagedir;
-	if (pd != NULL)
-	{
-		/* Correct ordering here is crucial.  We must set
+  pd = cur->pagedir;
+  if (pd != NULL)
+  {
+    /* Correct ordering here is crucial.  We must set
          cur->pagedir to NULL before switching page directories,
          so that a timer interrupt can't switch back to the
          process page directory.  We must activate the base page
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
-		cur->pagedir = NULL;
-		pagedir_activate (NULL);
-		pagedir_destroy (pd);
-	}
-	thread_exit();
+    cur->pagedir = NULL;
+    pagedir_activate (NULL);
+    pagedir_destroy (pd);
+  }
+  thread_exit();
 }
 
 /* Sets up the CPU for running user code in the current
