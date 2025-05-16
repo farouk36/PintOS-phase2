@@ -117,6 +117,7 @@ struct thread
   struct child_process{
    tid_t pid;
    struct thread* t;
+   struct list_elem elem; 
   };
 
 /* If false (default), use round-robin scheduler.

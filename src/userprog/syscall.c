@@ -20,6 +20,7 @@ static struct lock filesys_lock;
 char* get_parameter_string(void *esp, int offset);
 void exit(int status);
 
+int* get_parameters(void *esp, int offset);
 void 
 syscall_init (void)
 {
@@ -47,10 +48,12 @@ syscall_handler (struct intr_frame *f UNUSED)
     char* file_name = get_parameter_string(f->esp, 4);
     process_execute(file_name);
     break;
-  }
-  case SYS_WAIT:
-
-    break;
+}
+  case SYS_WAIT:{
+    // get pid 
+    int * parameter = get_parameters(f->esp , 4);
+    process_wait(*parameter);
+    break;}
   case SYS_CREATE:
     
     break;
@@ -113,4 +116,8 @@ void get_arguments (struct intr_frame *f, int *args, int num_args) {
     validate(ptr);
     args[i++] = convert_to_physical((const void *) ptr);
   }
+}
+int* get_parameters(void *esp, int offset){
+   validate((int *)(esp + offset));
+   return (int *)(esp + offset);
 }
