@@ -8,21 +8,20 @@
 #include "filesys/file.h"
 #include "threads/interrupt.h"
 #include "threads/vaddr.h"
-#include "process.h"
-#include "pagedir.h"
-#include "shutdown.h"
-
-
+#include "userprog/process.h"
+#include "userprog/pagedir.h"
+#include "devices/shutdown.h"
+#include "threads/malloc.h"
+#include <string.h>
 
 static void syscall_handler (struct intr_frame *);
-void validate(const void *ptr);
+void validate_ptr(const void *ptr);
+void validate_string(const char *str);
 static struct lock filesys_lock;
-char* get_parameter_string(void *esp, int offset);
-int convert_to_physical(const void *ptr);
 void get_arguments (struct intr_frame *f, int *args, int num_args);
 void terminate(int status);
 
-void 
+void
 syscall_init (void)
 {
   lock_init(&filesys_lock);
@@ -30,86 +29,100 @@ syscall_init (void)
 }
 
 static void
-syscall_handler (struct intr_frame *f UNUSED)
-{ 
-  int esp = convert_to_physical((void *) f->esp);
-  int syscall_number = *(int *) esp;
+syscall_handler (struct intr_frame *f)
+{
+  /* Validate that the stack pointer is valid */
+  validate_ptr(f->esp);
+  
+  /* Get the system call number */
+  int syscall_number = *(int *)(f->esp);
+  
+  /* Arguments array for system calls */
   int args[3];
-
+  
   switch (syscall_number)
   {
-  case SYS_HALT:
-    shutdown_power_off();
-    break;
-  case SYS_EXIT:
-  get_arguments(f, args, 1);
-    terminate( (int *) args[0]);
-    break;
-  case SYS_EXEC: 
-    get_arguments(f, args, 1);
-    char* file_name = (char *) args[0];
-    process_execute(file_name);
-    break;
-  case SYS_WAIT:{
-    // get pid 
-    int * parameter = (int *) args[0];
-    process_wait(*parameter);
-    break;}
-  case SYS_CREATE:
-    
-    break;
-  case SYS_REMOVE:
-    
-     break;
-  case SYS_OPEN:
-    break;
-  case SYS_FILESIZE:
- 
-    break;
-  case SYS_READ:
-
-    break;
-  case SYS_WRITE:
-    break;
-  case SYS_SEEK:
-
-    break;
-  case SYS_TELL:
-
-    break;
-  case SYS_CLOSE:
-
-    break;
+      case SYS_HALT:
+          shutdown_power_off();
+          break;
+      case SYS_EXIT:
+          get_arguments(f, args, 1);
+          terminate(*(int *)args[0]);
+          break;
+      case SYS_EXEC:
+          get_arguments(f, args, 1);
+          validate_ptr((const void *)*(int *)args[0]);
+          validate_string((const char *)*(int *)args[0]);
+          f->eax = process_execute((const char *)*(int *)args[0]);
+          break;
+      case SYS_WAIT:
+          get_arguments(f, args, 1);
+          f->eax = process_wait(*(int *)args[0]);
+          break;
+      case SYS_CREATE:
+          // Implementation would go here
+          break;
+      case SYS_REMOVE:
+          // Implementation would go here
+          break;
+      case SYS_OPEN:
+          // Implementation would go here
+          break;
+      case SYS_FILESIZE:
+          // Implementation would go here
+          break;
+      case SYS_READ:
+          // Implementation would go here
+          break;
+      case SYS_WRITE:
+          // Implementation would go here
+          break;
+      case SYS_SEEK:
+          // Implementation would go here
+          break;
+      case SYS_TELL:
+          // Implementation would go here
+          break;
+      case SYS_CLOSE:
+          // Implementation would go here
+          break;
+      default:
+          // Unknown system call
+          terminate(-1);
   }
 }
 
-
-void terminate(int status){
+void terminate(int status) {
   struct thread *cur = thread_current();
   cur->exit_status = status;
   printf("%s: exit(%d)\n", cur->name, status);
-  process_exit();
+  thread_exit();
 }
-void validate(const void *ptr){
-  if (ptr == NULL || !is_user_vaddr(ptr)){
+
+void validate_ptr(const void *ptr) {
+  if (ptr == NULL || !is_user_vaddr(ptr) || 
+      pagedir_get_page(thread_current()->pagedir, ptr) == NULL) {
     terminate(-1);
   }
 }
 
-int convert_to_physical(const void *ptr){
-  void *page = pagedir_get_page(thread_current()->pagedir, ptr);
-  if (page == NULL){
-    terminate(-1);
-  }else {
-    return (int) page;
+void validate_string(const char *str) {
+  // Validate the pointer itself
+  validate_ptr(str);
+  
+  // Validate each character until we reach the null terminator
+  for (; *str != '\0'; str++) {
+    validate_ptr(str);
   }
 }
 
-void get_arguments (struct intr_frame *f, int *args, int num_args) {
-  int i = 0;
-  while(i<num_args){
-    int *ptr = (int *) f->esp + 1 + i;
-    validate(ptr);
-    args[i++] = convert_to_physical((const void *) ptr);
+/* Retrieves arguments as addresses from the stack */
+void get_arguments(struct intr_frame *f, int *args, int num_args) {
+  int i;
+  
+  for (i = 0; i < num_args; i++) {
+    void *ptr = (int *)f->esp + i + 1; // Skip past the system call number
+    validate_ptr(ptr);
+    args[i] = (void *) ptr; // Store the address, not the value
   }
 }
