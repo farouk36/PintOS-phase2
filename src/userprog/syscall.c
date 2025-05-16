@@ -18,9 +18,10 @@ static void syscall_handler (struct intr_frame *);
 void validate(const void *ptr);
 static struct lock filesys_lock;
 char* get_parameter_string(void *esp, int offset);
-void exit(int status);
+int convert_to_physical(const void *ptr);
+void get_arguments (struct intr_frame *f, int *args, int num_args);
+void terminate(int status);
 
-int* get_parameters(void *esp, int offset);
 void 
 syscall_init (void)
 {
@@ -51,7 +52,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 }
   case SYS_WAIT:{
     // get pid 
-    int * parameter = get_parameters(f->esp , 4);
+    int * parameter = (int *) args[0];
     process_wait(*parameter);
     break;}
   case SYS_CREATE:
@@ -116,8 +117,4 @@ void get_arguments (struct intr_frame *f, int *args, int num_args) {
     validate(ptr);
     args[i++] = convert_to_physical((const void *) ptr);
   }
-}
-int* get_parameters(void *esp, int offset){
-   validate((int *)(esp + offset));
-   return (int *)(esp + offset);
 }
