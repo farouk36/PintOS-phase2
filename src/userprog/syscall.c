@@ -32,11 +32,14 @@ syscall_handler (struct intr_frame *f UNUSED)
   switch (syscall_number)
   {
   case SYS_HALT:
-    
+  shutdown_power_off();
+
     break;
-  case SYS_EXIT:
-    
+  case SYS_EXIT: {
+    int* status = get_parameters(f->esp, 4);
+    terminate(*status);
     break;
+}
   case SYS_EXEC: {
     char* file_name = get_parameter_string(f->esp, 4);
     validate(file_name);
@@ -81,7 +84,7 @@ void terminate(int status){
   struct thread *cur = thread_current();
   cur->exit_status = status;
   printf("%s: exit(%d)\n", cur->name, status);
-  thread_exit();
+  process_exit();
 }
 void validate(const void *ptr){
   if (ptr == NULL || !is_user_vaddr(ptr) ||pagedir_get_page(thread_current()->pagedir, ptr) == NULL){
