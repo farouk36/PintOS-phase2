@@ -141,18 +141,18 @@ sys_wait(tid_t pid) {
 
 static bool 
 sys_create(const char *file, unsigned initial_size) {
-  if (!filesys_create(file, initial_size)) {
-    return false;
-  }
-  return true;
+  lock_acquire (&filesys_lock);
+  bool success = filesys_create(file, initial_size);
+  lock_release (&filesys_lock);
+  return success;
 }
 
 static bool 
 sys_remove(const char *file) {
-  if (!filesys_remove(file)) {
-    return false;
-  }
-  return true;
+  lock_acquire (&filesys_lock);
+  bool success = filesys_remove(file);
+  lock_release (&filesys_lock);
+  return success;
 }
 
 static int 

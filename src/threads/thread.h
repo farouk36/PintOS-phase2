@@ -94,12 +94,12 @@ struct thread
     struct list *children;              /* List element for ready list. */
     struct thread *parent;               /* Parent thread. */
     bool child_creation_success;
-    struct semaphore *wait_connection;
-   //  struct semaphore *wait_parent;
+    struct semaphore *wait_connection;       //  struct semaphore *wait_parent;
     tid_t waiting_on;
     int fd_last;
     struct file *fd_table[128];         /* File descriptor table. */
     struct list *open_files;            /* List of open files. */
+    struct list *locks_held;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -118,6 +118,11 @@ struct thread
    tid_t pid;
    struct thread* t;
    struct list_elem elem; 
+  };
+
+  struct locks_held{
+   struct lock* lock;
+   struct list_elem elem;
   };
   struct open_file{
        int fd;
