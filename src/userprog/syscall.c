@@ -1,4 +1,4 @@
-#include "userprog/syscall.h"
+#include "syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
@@ -9,16 +9,18 @@
 #include "threads/interrupt.h"
 #include "threads/vaddr.h"
 #include "process.h"
+
+// Define tid_t if not already defined
 #include "pagedir.h"
 #include "devices/shutdown.h"
-#include <syscall.h>
-#include <fcntl.h>
+// #include <syscall.h>
+
 
 // Function declarations for system calls
 static void sys_halt(void);
 static void sys_exit(int status);
-static pid_t sys_exec(const char *cmd_line);
-static int sys_wait(pid_t pid);
+static tid_t sys_exec(const char *cmd_line);
+static int sys_wait(tid_t pid);
 static bool sys_create(const char *file, unsigned initial_size);
 static bool sys_remove(const char *file);
 static int sys_open(const char *file);
@@ -73,7 +75,7 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_WAIT:
       get_arguments(f, args, 1);
-      f->eax = sys_wait(*(pid_t*)args[0]);
+      f->eax = sys_wait(*(tid_t*)args[0]);
       break;
     case SYS_CREATE:
       get_arguments(f, args, 2);
@@ -127,13 +129,13 @@ sys_exit(int status) {
   terminate(status);
 }
 
-static pid_t 
+static tid_t 
 sys_exec(const char *cmd_line) {
   return process_execute(cmd_line);
 }
 
 static int 
-sys_wait(pid_t pid) {
+sys_wait(tid_t pid) {
   return process_wait(pid);
 }
 
@@ -156,11 +158,22 @@ sys_remove(const char *file) {
 static int 
 sys_open(const char *file) {
   struct file *opened_file = filesys_open(file);
+  struct open_file * new_file = malloc(sizeof(struct open_file));
   if (opened_file == NULL) {
     return -1;
   }
   int fd = thread_current()->fd_last++;
   thread_current()->fd_table[fd] = opened_file;
+  new_file->fd = fd ;
+  new_file->file = opened_file;
+  lock_acquire(&filesys_lock);
+  list_push_back(&thread_current()->open_files, &new_file->elem);
+  lock_release(&filesys_lock);
+  if (new_file == NULL) {
+    file_close(opened_file);
+    return -1;
+  }
+  
   return fd;
 }
 
@@ -223,7 +236,7 @@ sys_tell(int fd) {
   return pos;
 }
 
-static void 
+void 
 sys_close(int fd) {
   struct file *file = thread_current()->fd_table[fd];
   if (file == NULL) {
@@ -239,7 +252,13 @@ void terminate(int status){
   struct thread *cur = thread_current();
   cur->exit_status = status;
   printf("%s: exit(%d)\n", cur->name, status);
-  thread_exit();
+  struct list_elem * e ;
+	struct open_file * curFile ;
+    for (e = list_begin(&thread_current()->open_files); e != list_end(&thread_current()->open_files); e = list_next(e)){
+        curFile = list_entry(e,struct open_file , elem);
+		sys_close(curFile->fd);
+	}
+  process_exit();
 }
 
 void validate_ptr(const void *ptr) {

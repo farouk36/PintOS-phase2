@@ -20,6 +20,8 @@
 
 
 
+
+
 /* Used for setup_stack */
 static void push_stack(int order, void **esp, char *token, char **argv, int argc);
 
@@ -136,6 +138,7 @@ process_exit (void)
 	tid_t tid = cur->tid;
 
 	// remove files
+	
 
 	if(cur->parent !=NULL && cur->parent->waiting_on == tid){
 		cur->parent->waiting_on = -1;

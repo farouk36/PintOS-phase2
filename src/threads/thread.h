@@ -99,7 +99,7 @@ struct thread
     tid_t waiting_on;
     int fd_last;
     struct file *fd_table[128];         /* File descriptor table. */
-
+    struct list *open_files;            /* List of open files. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -118,6 +118,11 @@ struct thread
    tid_t pid;
    struct thread* t;
    struct list_elem elem; 
+  };
+  struct open_file{
+       int fd;
+       struct file* file;
+       struct list_elem elem;
   };
 
 /* If false (default), use round-robin scheduler.
