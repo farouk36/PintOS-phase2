@@ -78,6 +78,8 @@ start_process (void *file_name_)
 	sema_up(thread_current()->parent->wait_connection);
 	if(success){
 		sema_down(thread_current()->parent->wait_connection);
+	}else {
+		thread_exit();
 	}
 	/* If load failed, quit. */
 	palloc_free_page (file_name);

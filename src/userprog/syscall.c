@@ -16,6 +16,7 @@
 static void syscall_handler (struct intr_frame *);
 void validate(const void *ptr);
 static struct lock filesys_lock;
+char* get_parameter_string(void *esp, int offset);
 
 void 
 syscall_init (void)
@@ -36,9 +37,12 @@ syscall_handler (struct intr_frame *f UNUSED)
   case SYS_EXIT:
     
     break;
-  case SYS_EXEC:
-    
+  case SYS_EXEC: {
+    char* file_name = get_parameter_string(f->esp, 4);
+    validate(file_name);
+    process_execute(file_name);
     break;
+}
   case SYS_WAIT:
    
     break;
@@ -57,17 +61,6 @@ syscall_handler (struct intr_frame *f UNUSED)
 
     break;
   case SYS_WRITE:
-    int file_d = *get_paramater(f->esp,4);
-    const void *bfr = (void *) *get_paramater(f->esp,8);
-    if (!isValid_ptr(bfr)) exiter(-1);
-    unsigned size = *get_paramater(f->esp,12);
-    if(file_d<0||file_d>=128) return;
-    if (file_d == 1) {
-      lock_acquire(&filesys_lock);
-      putbuf(bfr, size);
-      lock_release(&filesys_lock);
-      f->eax = size;
-    }
     break;
   case SYS_SEEK:
 
@@ -93,7 +86,7 @@ void validate(const void *ptr){
     terminate(-1);
   }
 }
-int* get_paramater(void *esp,int offset){
-  validate((int *)(esp + offset));
-  return (int *)(esp + offset);
+char* get_parameter_string(void *esp, int offset) {
+  validate((char *)(esp + offset));
+  return *(char **)(esp + offset);
 }
