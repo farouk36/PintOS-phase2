@@ -125,6 +125,7 @@ start_process (void *file_name_)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
+// In process_wait():
 int
 process_wait (tid_t child_tid) 
 {
@@ -132,80 +133,71 @@ process_wait (tid_t child_tid)
   struct child_process *child = NULL;
   struct thread *cur = thread_current();
 
-
-
-   struct thread *child_thread = get_Child(child_tid);
-   if(child_thread == NULL) {
-	 return -1;
-   }
-
+  // Find the child in our children list
+  struct thread *child_thread = get_Child(child_tid);
+  if(child_thread == NULL) {
+    return -1;  // Not our child or invalid tid
+  }
 
   // Wait for child to exit
- 
-  sema_up(&child_thread->sema);
-   cur->waiting_on = child_tid;
-  // remove child from parent's children list
+  sema_up(&child_thread->sema);  // Allow child to proceed if it's waiting
+  cur->waiting_on = child_tid;
+  
+  // Remove child from parent's children list
   for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
-	child = list_entry(e, struct child_process, elem);
-	if (child->pid == child_tid) {
-	  list_remove(e);
-	  break;
-	}
+    child = list_entry(e, struct child_process, elem);
+    if (child->pid == child_tid) {
+      list_remove(e);
+      free(child);  // Free the child_process struct
+      break;
+    }
   }
   
-  
+  // Wait for child's exit status
   sema_down(&cur->sema);
   
+  // Clear waiting status and return exit code
+  cur->waiting_on = -1;
   return cur->exit_status;
 }
 
 /* Free the current process's resources. */
+// In process_exit():
 void
 process_exit (void)
 {
   struct thread *cur = thread_current();
   
   // Close all open files
-  struct list_elem *e;
   while (!list_empty(&cur->open_files)) {
-    e = list_pop_front(&cur->open_files);
+    struct list_elem *e = list_pop_front(&cur->open_files);
     struct open_file *of = list_entry(e, struct open_file, elem);
     file_close(of->file);
     free(of);
   }
 
-    while (!list_empty(&cur->children)) {
-		e = list_pop_front(&cur->children);
-		struct child_process *ch = list_entry(e, struct child_process, elem);
-		ch->t->parent=NULL;
-        sema_up(&ch->t->sema);
-    }
-  
-  // Signal parent if it's waiting
-  if (cur->parent != NULL && cur->parent->waiting_on == cur->tid) {
-	cur->parent->waiting_on =-1;
-	sema_up(&cur->parent->sema);
+  // Clean up child processes
+  while (!list_empty(&cur->children)) {
+    struct list_elem *e = list_pop_front(&cur->children);
+    struct child_process *ch = list_entry(e, struct child_process, elem);
+    ch->t->parent = NULL;  // Orphan the child
+    sema_up(&ch->t->sema); // Let child continue if it's waiting
+    free(ch);
   }
   
-  uint32_t *pd;
-
-  tid_t tid = cur->tid;
-
-  /* Destroy the current process's page directory and switch back
-     to the kernel-only page directory. */
-  pd = cur->pagedir;
-  if (pd != NULL)
-  {
-    /* Correct ordering here is crucial.  We must set
-         cur->pagedir to NULL before switching page directories,
-         so that a timer interrupt can't switch back to the
-         process page directory.  We must activate the base page
-         directory before destroying the process's page
-         directory, or our active page directory will be one
-         that's been freed (and cleared). */
+  // Signal parent if it's waiting for us
+  if (cur->parent != NULL && cur->parent->waiting_on == cur->tid) {
+    cur->parent->exit_status = cur->exit_status; // Pass our exit status
+    cur->parent->waiting_on = -1;
+    sema_up(&cur->parent->sema);
+  }
+  
+  // Rest of the cleanup (page directory, etc.)
+  uint32_t *pd = cur->pagedir;
+  if (pd != NULL) {
     cur->pagedir = NULL;
-    pagedir_activate (NULL);
-    pagedir_destroy (pd);
+    pagedir_activate(NULL);
+    pagedir_destroy(pd);
   }
 }
 

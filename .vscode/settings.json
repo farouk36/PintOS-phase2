@@ -8,6 +8,8 @@
     "*.inc": "c",
     "thread.h": "c",
     "palloc.h": "c",
-    "vaddr.h": "c"
+    "vaddr.h": "c",
+    "cstdlib": "c",
+    "typeinfo": "c"
   }
 }
