@@ -18,35 +18,11 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-
-
-
-
 /* Used for setup_stack */
 static void push_stack(int order, void **esp, char *token, char **argv, int argc);
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp, char** save_ptr);
-
-/* Starts a new thread running a user program loaded from
-   FILENAME.  The new thread may be scheduled (and may even exit)
-   before process_execute() returns.  Returns the new process's
-   thread id, or TID_ERROR if the thread cannot be created. */
-
-struct thread* get_Child (tid_t id){
-	struct list_elem *e;
-	struct child_process *child = NULL;
-	struct thread *cur = thread_current();
-
-	// Find child in children list
-	for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
-		child = list_entry(e, struct child_process, elem);
-		if (child->pid == id) {
-			return child->t;
-		}
-	}
-	return NULL;
-}
 
 tid_t
 process_execute (const char *file_name) 
@@ -54,24 +30,20 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  /* Make a copy of FILE_NAME for the new thread */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Parse the file name to get the executable name */
   char *save_ptr;
   char *name = malloc(strlen(file_name) + 1);
   if (name == NULL) {
     palloc_free_page(fn_copy);
     return TID_ERROR;
   }
-  
   strlcpy(name, file_name, strlen(file_name) + 1);
   char *fname = strtok_r(name, " ", &save_ptr);
-  
-  /* Verify the file exists before creating thread */
+
   struct file *f = filesys_open(fname);
   if (f == NULL) {
     free(name);
@@ -79,21 +51,19 @@ process_execute (const char *file_name)
     return TID_ERROR;
   }
   file_close(f);
-    
+
   tid = thread_create (fname, PRI_DEFAULT, start_process, fn_copy);
   free(name);
-  
+
   if (tid == TID_ERROR) {
     palloc_free_page(fn_copy);
     return TID_ERROR;
   }
-  
-  /* Wait for child to load */
+
   sema_down(&thread_current()->sema);
-  
-  /* If load failed, cleanup child process */
+
   if (!thread_current()->load_success) {
-    /* Find and remove child from our children list */
+    // Remove and free child_process struct if load failed
     struct list_elem *e;
     for (e = list_begin(&thread_current()->children); 
          e != list_end(&thread_current()->children); 
@@ -107,7 +77,7 @@ process_execute (const char *file_name)
     }
     return TID_ERROR;
   }
-  
+
   return tid;
 }
 
@@ -120,37 +90,29 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
-  /* Parse the file name */
   char *save_ptr;
   file_name = strtok_r(file_name, " ", &save_ptr);
 
-  /* Initialize interrupt frame and load executable */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  
-  /* Attempt to load the program */
+
   success = load(file_name, &if_.eip, &if_.esp, &save_ptr);
-  
-  /* Inform parent of load result */
+
   if (thread_current()->parent != NULL) {
     thread_current()->parent->load_success = success;
     sema_up(&thread_current()->parent->sema);
   }
 
-  /* Free the file_name copy */
   palloc_free_page(file_name);
-  
-  /* If load failed, exit now */
+
   if (!success) {
     thread_exit();
   }
-  
-  /* Wait for the parent to finish its setup */
+
   sema_down(&thread_current()->sema);
 
-  /* Start the user process */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
@@ -163,18 +125,16 @@ start_process (void *file_name_)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-// In process_wait():
 int
 process_wait (tid_t child_tid) 
 {
   struct thread *cur = thread_current();
   struct thread *child_thread = NULL;
   int exit_status = -1;
-  
-  /* Find the child in our children list */
+
   struct list_elem *e;
   struct child_process *child = NULL;
-  
+
   for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
     child = list_entry(e, struct child_process, elem);
     if (child->pid == child_tid) {
@@ -182,30 +142,22 @@ process_wait (tid_t child_tid)
       break;
     }
   }
-  
+
   if (child_thread == NULL) {
-    return -1;  // Not our child or invalid tid
+    return -1;
   }
-  
-  /* Mark that we're waiting on this child */
+
   cur->waiting_on = child_tid;
-  
-  /* Allow child to continue if it's waiting */
   sema_up(&child_thread->sema);
-  
-  /* Wait for child to exit */
   sema_down(&cur->sema);
-  
-  /* Get exit status and clean up child process structure */
+
   exit_status = cur->exit_status;
-  
-  /* Remove child from children list */
+
   list_remove(&child->elem);
   free(child);
-  
-  /* Clear waiting status */
+
   cur->waiting_on = -1;
-  
+
   return exit_status;
 }
 /* Free the current process's resources. */
@@ -214,15 +166,13 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current();
-  
-  /* Close executable file if open */
+
   if (cur->executable != NULL) {
     file_allow_write(cur->executable);
     file_close(cur->executable);
     cur->executable = NULL;
   }
-  
-  /* Close all open files */
+
   struct list_elem *e;
   while (!list_empty(&cur->open_files)) {
     e = list_pop_front(&cur->open_files);
@@ -230,8 +180,7 @@ process_exit (void)
     file_close(of->file);
     free(of);
   }
-  
-  /* Clear file descriptor table */
+
   for (int i = 0; i < 128; i++) {
     if (cur->fd_table[i] != NULL) {
       file_close(cur->fd_table[i]);
@@ -239,25 +188,22 @@ process_exit (void)
     }
   }
 
-  /* Clean up child processes */
   while (!list_empty(&cur->children)) {
     e = list_pop_front(&cur->children);
     struct child_process *ch = list_entry(e, struct child_process, elem);
     if (ch->t != NULL) {
-      ch->t->parent = NULL;  // Orphan the child
-      sema_up(&ch->t->sema); // Let child continue if it's waiting
+      ch->t->parent = NULL;
+      sema_up(&ch->t->sema);
     }
     free(ch);
   }
-  
-  /* Signal parent if it's waiting for us */
+
   if (cur->parent != NULL && cur->parent->waiting_on == cur->tid) {
-    cur->parent->exit_status = cur->exit_status; // Pass our exit status
+    cur->parent->exit_status = cur->exit_status;
     cur->parent->waiting_on = -1;
     sema_up(&cur->parent->sema);
   }
-  
-  /* Free the page directory */
+
   uint32_t *pd = cur->pagedir;
   if (pd != NULL) {
     cur->pagedir = NULL;

@@ -135,13 +135,14 @@ static tid_t
 sys_exec(const char *cmd_line) 
 {
   validate_string(cmd_line);
-  
+
   tid_t tid;
   lock_acquire(&filesys_lock);
   tid = process_execute(cmd_line);
   lock_release(&filesys_lock);
-  
-  return tid;
+
+  // Return -1 if exec failed, as required by Pintos spec
+  return tid == TID_ERROR ? -1 : tid;
 }
 static int 
 sys_wait(tid_t pid) {
