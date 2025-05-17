@@ -60,7 +60,7 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME */
+  /* Parse the file name to get the executable name */
   char *save_ptr;
   char *name = malloc(strlen(file_name) + 1);
   if (name == NULL) {
@@ -83,13 +83,29 @@ process_execute (const char *file_name)
   tid = thread_create (fname, PRI_DEFAULT, start_process, fn_copy);
   free(name);
   
-  if (tid == TID_ERROR)
+  if (tid == TID_ERROR) {
     palloc_free_page(fn_copy);
-  else {
-    sema_down(&thread_current()->sema);
-    if (!thread_current()->load_success) {
-      tid = TID_ERROR;
+    return TID_ERROR;
+  }
+  
+  /* Wait for child to load */
+  sema_down(&thread_current()->sema);
+  
+  /* If load failed, cleanup child process */
+  if (!thread_current()->load_success) {
+    /* Find and remove child from our children list */
+    struct list_elem *e;
+    for (e = list_begin(&thread_current()->children); 
+         e != list_end(&thread_current()->children); 
+         e = list_next(e)) {
+      struct child_process *child = list_entry(e, struct child_process, elem);
+      if (child->pid == tid) {
+        list_remove(e);
+        free(child);
+        break;
+      }
     }
+    return TID_ERROR;
   }
   
   return tid;
@@ -104,35 +120,40 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
-  /* the first token is file name */
+  /* Parse the file name */
   char *save_ptr;
   file_name = strtok_r(file_name, " ", &save_ptr);
 
-  /* Initialize interrupt frame and load executable. */
+  /* Initialize interrupt frame and load executable */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   
-  success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
-  thread_current()->parent->load_success = success;
-  sema_up(&thread_current()->parent->sema);
- 
+  /* Attempt to load the program */
+  success = load(file_name, &if_.eip, &if_.esp, &save_ptr);
+  
+  /* Inform parent of load result */
+  if (thread_current()->parent != NULL) {
+    thread_current()->parent->load_success = success;
+    sema_up(&thread_current()->parent->sema);
+  }
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
+  /* Free the file_name copy */
+  palloc_free_page(file_name);
+  
+  /* If load failed, exit now */
   if (!success) {
     thread_exit();
-    // NOT_REACHED();
-  }else{
-	sema_down(&thread_current()->sema);
   }
+  
+  /* Wait for the parent to finish its setup */
+  sema_down(&thread_current()->sema);
 
   /* Start the user process */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
-
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
@@ -146,74 +167,97 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid) 
 {
+  struct thread *cur = thread_current();
+  struct thread *child_thread = NULL;
+  int exit_status = -1;
+  
+  /* Find the child in our children list */
   struct list_elem *e;
   struct child_process *child = NULL;
-  struct thread *cur = thread_current();
-
-  // Find the child in our children list
-  struct thread *child_thread = get_Child(child_tid);
-  if(child_thread == NULL) {
-    return -1;  // Not our child or invalid tid
-  }
-
-  // Wait for child to exit
-  sema_up(&child_thread->sema);  // Allow child to proceed if it's waiting
-  cur->waiting_on = child_tid;
   
-  // Remove child from parent's children list
   for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
     child = list_entry(e, struct child_process, elem);
     if (child->pid == child_tid) {
-      list_remove(e);
-      free(child);  // Free the child_process struct
+      child_thread = child->t;
       break;
     }
   }
   
-  // Wait for child's exit status
+  if (child_thread == NULL) {
+    return -1;  // Not our child or invalid tid
+  }
+  
+  /* Mark that we're waiting on this child */
+  cur->waiting_on = child_tid;
+  
+  /* Allow child to continue if it's waiting */
+  sema_up(&child_thread->sema);
+  
+  /* Wait for child to exit */
   sema_down(&cur->sema);
   
-  // Clear waiting status and return exit code
+  /* Get exit status and clean up child process structure */
+  exit_status = cur->exit_status;
+  
+  /* Remove child from children list */
+  list_remove(&child->elem);
+  free(child);
+  
+  /* Clear waiting status */
   cur->waiting_on = -1;
-  return cur->exit_status;
+  
+  return exit_status;
 }
-
 /* Free the current process's resources. */
 // In process_exit():
 void
 process_exit (void)
 {
   struct thread *cur = thread_current();
+  
+  /* Close executable file if open */
   if (cur->executable != NULL) {
-        file_allow_write(cur->executable);
-        file_close(cur->executable);
-        cur->executable = NULL;
-    }
-  // Close all open files
+    file_allow_write(cur->executable);
+    file_close(cur->executable);
+    cur->executable = NULL;
+  }
+  
+  /* Close all open files */
+  struct list_elem *e;
   while (!list_empty(&cur->open_files)) {
-    struct list_elem *e = list_pop_front(&cur->open_files);
+    e = list_pop_front(&cur->open_files);
     struct open_file *of = list_entry(e, struct open_file, elem);
     file_close(of->file);
     free(of);
   }
+  
+  /* Clear file descriptor table */
+  for (int i = 0; i < 128; i++) {
+    if (cur->fd_table[i] != NULL) {
+      file_close(cur->fd_table[i]);
+      cur->fd_table[i] = NULL;
+    }
+  }
 
-  // Clean up child processes
+  /* Clean up child processes */
   while (!list_empty(&cur->children)) {
-    struct list_elem *e = list_pop_front(&cur->children);
+    e = list_pop_front(&cur->children);
     struct child_process *ch = list_entry(e, struct child_process, elem);
-    ch->t->parent = NULL;  // Orphan the child
-    sema_up(&ch->t->sema); // Let child continue if it's waiting
+    if (ch->t != NULL) {
+      ch->t->parent = NULL;  // Orphan the child
+      sema_up(&ch->t->sema); // Let child continue if it's waiting
+    }
     free(ch);
   }
   
-  // Signal parent if it's waiting for us
+  /* Signal parent if it's waiting for us */
   if (cur->parent != NULL && cur->parent->waiting_on == cur->tid) {
     cur->parent->exit_status = cur->exit_status; // Pass our exit status
     cur->parent->waiting_on = -1;
     sema_up(&cur->parent->sema);
   }
   
-  // Rest of the cleanup (page directory, etc.)
+  /* Free the page directory */
   uint32_t *pd = cur->pagedir;
   if (pd != NULL) {
     cur->pagedir = NULL;
@@ -221,7 +265,6 @@ process_exit (void)
     pagedir_destroy(pd);
   }
 }
-
 /* Sets up the CPU for running user code in the current
    thread.
    This function is called on every context switch. */
@@ -421,7 +464,10 @@ load (const char *file_name, void (**eip) (void), void **esp, char **save_ptr)
 	done:
 	/* We arrive here whether the load is successful or not. */
 	if (!success && file != NULL) {
+		file_allow_write(file);
+		t->executable = NULL;
         file_close (file);  /* Only close the file if loading failed */
+
     }
 	return success;
 }

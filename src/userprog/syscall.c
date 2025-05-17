@@ -141,9 +141,8 @@ sys_exec(const char *cmd_line)
   tid = process_execute(cmd_line);
   lock_release(&filesys_lock);
   
-  return tid == TID_ERROR ? -1 : tid;
+  return tid;
 }
-
 static int 
 sys_wait(tid_t pid) {
   return process_wait(pid);
@@ -305,17 +304,25 @@ sys_close(int fd) {
   }
 }
 
-void terminate(int status){
+void terminate(int status) {
   struct thread *cur = thread_current();
   cur->exit_status = status;
   printf("%s: exit(%d)\n", cur->name, status);
-  // Close all open files and free open_file structs
+  
+  /* Don't call sys_close, which could lead to infinite recursion */
+  struct list_elem *e;
   while (!list_empty(&cur->open_files)) {
-    struct list_elem *e = list_pop_front(&cur->open_files);
+    e = list_pop_front(&cur->open_files);
     struct open_file *of = list_entry(e, struct open_file, elem);
-    sys_close(of->fd); // This will also free the struct
-    // No need to free(of) here, already freed in sys_close
+    
+    /* Close file directly and update fd table */
+    if (cur->fd_table[of->fd] != NULL) {
+      file_close(cur->fd_table[of->fd]);
+      cur->fd_table[of->fd] = NULL;
+    }
+    free(of);
   }
+  
   thread_exit();
 }
 
