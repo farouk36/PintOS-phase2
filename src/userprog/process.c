@@ -51,30 +51,47 @@ struct thread* get_Child (tid_t id){
 tid_t
 process_execute (const char *file_name) 
 {
-	char *fn_copy;
-	tid_t tid;
-	/* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-	fn_copy = palloc_get_page (0);
-	if (fn_copy == NULL)
-		return TID_ERROR;
-	strlcpy (fn_copy, file_name, PGSIZE);
+  char *fn_copy;
+  tid_t tid;
 
-	/* Parsed file name */
-	char *save_ptr;
-	file_name = strtok_r((char *) file_name, " ", &save_ptr);
-    
-	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-	sema_down(&thread_current()->sema);
+  /* Make a copy of FILE_NAME for the new thread */
+  fn_copy = palloc_get_page (0);
+  if (fn_copy == NULL)
+    return TID_ERROR;
+  strlcpy (fn_copy, file_name, PGSIZE);
 
-	if(!thread_current()->load_success)
-    tid = TID_ERROR;
-  
-  if (tid == TID_ERROR) {
+  /* Create a new thread to execute FILE_NAME */
+  char *save_ptr;
+  char *name = malloc(strlen(file_name) + 1);
+  if (name == NULL) {
     palloc_free_page(fn_copy);
-    return tid;
+    return TID_ERROR;
   }
+  
+  strlcpy(name, file_name, strlen(file_name) + 1);
+  char *fname = strtok_r(name, " ", &save_ptr);
+  
+  /* Verify the file exists before creating thread */
+  struct file *f = filesys_open(fname);
+  if (f == NULL) {
+    free(name);
+    palloc_free_page(fn_copy);
+    return TID_ERROR;
+  }
+  file_close(f);
+    
+  tid = thread_create (fname, PRI_DEFAULT, start_process, fn_copy);
+  free(name);
+  
+  if (tid == TID_ERROR)
+    palloc_free_page(fn_copy);
+  else {
+    sema_down(&thread_current()->sema);
+    if (!thread_current()->load_success) {
+      tid = TID_ERROR;
+    }
+  }
+  
   return tid;
 }
 
