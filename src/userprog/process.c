@@ -167,7 +167,11 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current();
-  
+  if (cur->executable != NULL) {
+        file_allow_write(cur->executable);
+        file_close(cur->executable);
+        cur->executable = NULL;
+    }
   // Close all open files
   while (!list_empty(&cur->open_files)) {
     struct list_elem *e = list_pop_front(&cur->open_files);
@@ -315,7 +319,7 @@ load (const char *file_name, void (**eip) (void), void **esp, char **save_ptr)
 		goto done;
 	}
 	file_deny_write(file);
-
+     t->executable = file;
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
@@ -399,7 +403,9 @@ load (const char *file_name, void (**eip) (void), void **esp, char **save_ptr)
 
 	done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	if (!success && file != NULL) {
+        file_close (file);  /* Only close the file if loading failed */
+    }
 	return success;
 }
 

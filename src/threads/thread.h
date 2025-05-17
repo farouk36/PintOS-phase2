@@ -100,6 +100,7 @@ struct thread
     struct file *fd_table[128];         /* File descriptor table. */
     struct list open_files;            /* List of open files. */
     bool load_success;
+    struct file *executable; 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
     int exit_status;                  /* Exit status. */
