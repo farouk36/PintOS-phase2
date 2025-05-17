@@ -286,7 +286,7 @@ sys_close(int fd) {
 
 void terminate(int status){
   struct thread *cur = thread_current();
-  cur->exit_status = status;
+  cur->parent->exit_status = status;
   printf("%s: exit(%d)\n", cur->name, status);
   struct list_elem * e ;
 	struct open_file * curFile ;
@@ -294,7 +294,7 @@ void terminate(int status){
         curFile = list_entry(e,struct open_file , elem);
 		sys_close(curFile->fd);
 	}
-  process_exit();
+  thread_exit();
 }
 
 void validate_ptr(const void *ptr) {

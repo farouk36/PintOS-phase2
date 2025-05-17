@@ -184,8 +184,11 @@ thread_create (const char *name, int priority,
 	/* Initialize thread. */
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
-	t->exit_status = -1;
-	t->status = THREAD_BLOCKED;  // Explicitly set initial status
+
+
+        //     connection parent && child    //
+	list_push_back(&thread_current()->children, &t->elem);
+	t->parent = thread_current();
 
 	/* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
@@ -298,13 +301,13 @@ thread_exit (void)
      when it calls thread_schedule_tail(). */
 	intr_disable ();
 	list_remove (&thread_current()->allelem);
-	/* Free all open files */
-	struct list_elem *e;
-	struct open_file *curFile;
-	for (e = list_begin(&thread_current()->open_files); e != list_end(&thread_current()->open_files); e = list_next(e)){
-		curFile = list_entry(e,struct open_file , elem);
-		file_close(curFile->file);
-	}
+	// /* Free all open files */
+	// struct list_elem *e;
+	// struct open_file *curFile;
+	// for (e = list_begin(&thread_current()->open_files); e != list_end(&thread_current()->open_files); e = list_next(e)){
+	// 	curFile = list_entry(e,struct open_file , elem);
+	// 	file_close(curFile->file);
+	// }
 
 	thread_current ()->status = THREAD_DYING;
 	schedule ();
@@ -481,8 +484,8 @@ init_thread (struct thread *t, const char *name, int priority)
 
 	list_init(&t->children);
 	list_init(&t->open_files);
-	sema_init(&t->load_sema, 0);
-	sema_init(&t->exit_sema, 0);
+	sema_init(&t->sema, 0);
+	sema_init(&t->sema, 0);
 
     t->fd_last = 2;
     t->exit_status = -1;

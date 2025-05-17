@@ -93,16 +93,15 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
     struct list children;              /* List element for ready list. */
     struct thread *parent;               /* Parent thread. */
-    struct semaphore load_sema;        // struct semaphore *load_sema;
-    struct semaphore exit_sema;        // struct semaphore *exit_sema;
+    struct semaphore sema;      
+
     tid_t waiting_on;
     int fd_last;
     struct file *fd_table[128];         /* File descriptor table. */
     struct list open_files;            /* List of open files. */
-
+    bool load_success;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
-
     int exit_status;                  /* Exit status. */
 
 #ifdef USERPROG

@@ -66,14 +66,16 @@ process_execute (const char *file_name)
     
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-	struct thread *child_thread = get_Child(tid);
-	if(child_thread != NULL){
-		sema_down(&child_thread->load_sema);
-	}
-	
-	if (tid == TID_ERROR)
-		palloc_free_page (fn_copy);
-	return tid;
+	sema_down(&thread_current()->sema);
+
+	if(!thread_current()->load_success)
+    tid = TID_ERROR;
+  
+  if (tid == TID_ERROR) {
+    palloc_free_page(fn_copy);
+    return tid;
+  }
+  return tid;
 }
 
 /* A thread function that loads a user process and starts it
@@ -96,17 +98,17 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   
   success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
-  
-  // Signal parent about load result
-  if (thread_current()->parent != NULL) {
-    sema_up(&thread_current()->load_sema);
-  }
+  thread_current()->parent->load_success = success;
+  sema_up(&thread_current()->parent->sema);
+ 
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) {
     thread_exit();
-    NOT_REACHED();
+    // NOT_REACHED();
+  }else{
+	sema_down(&thread_current()->sema);
   }
 
   /* Start the user process */
@@ -124,34 +126,37 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
   struct list_elem *e;
   struct child_process *child = NULL;
   struct thread *cur = thread_current();
 
-  // Find child in children list
-  for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
-    child = list_entry(e, struct child_process, elem);
-    if (child->pid == child_tid) {
-      list_remove(&child->elem);
-      break;
-    }
-  }
 
-  // Child not found or already waited on
-  if (child == NULL)
-    return -1;
+
+   struct thread *child_thread = get_Child(child_tid);
+   if(child_thread == NULL) {
+	 return -1;
+   }
+
 
   // Wait for child to exit
-  cur->waiting_on = child_tid;
-  struct thread *child_thread = get_Child(child_tid);
-  sema_down(&child_thread->exit_sema);
+ 
+  sema_up(&child_thread->sema);
+   cur->waiting_on = child_tid;
+  // remove child from parent's children list
+  for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e)) {
+	child = list_entry(e, struct child_process, elem);
+	if (child->pid == child_tid) {
+	  list_remove(e);
+	  break;
+	}
+  }
   
-  int status = child->t->exit_status;
-  free(child);
   
-  return status;
+  sema_down(&cur->sema);
+  
+  return cur->exit_status;
 }
 
 /* Free the current process's resources. */
@@ -168,10 +173,18 @@ process_exit (void)
     file_close(of->file);
     free(of);
   }
+
+    while (!list_empty(&cur->children)) {
+		e = list_pop_front(&cur->children);
+		struct child_process *ch = list_entry(e, struct child_process, elem);
+		ch->t->parent=NULL;
+        sema_up(&ch->t->sema);
+    }
   
   // Signal parent if it's waiting
   if (cur->parent != NULL && cur->parent->waiting_on == cur->tid) {
-    sema_up(&cur->exit_sema);
+	cur->parent->waiting_on =-1;
+	sema_up(&cur->parent->sema);
   }
   
   uint32_t *pd;
@@ -194,7 +207,6 @@ process_exit (void)
     pagedir_activate (NULL);
     pagedir_destroy (pd);
   }
-  thread_exit();
 }
 
 /* Sets up the CPU for running user code in the current
