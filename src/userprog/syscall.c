@@ -132,8 +132,16 @@ sys_exit(int status) {
 }
 
 static tid_t 
-sys_exec(const char *cmd_line) {
-  return process_execute(cmd_line);
+sys_exec(const char *cmd_line) 
+{
+  validate_string(cmd_line);
+  
+  tid_t tid;
+  lock_acquire(&filesys_lock);
+  tid = process_execute(cmd_line);
+  lock_release(&filesys_lock);
+  
+  return tid == TID_ERROR ? -1 : tid;
 }
 
 static int 
@@ -312,10 +320,10 @@ void terminate(int status){
 }
 
 void validate_ptr(const void *ptr) {
-  if (ptr == NULL || !is_user_vaddr(ptr) || 
-      pagedir_get_page(thread_current()->pagedir, ptr) == NULL) {
-    terminate(-1);
-  }
+    if (ptr == NULL || !is_user_vaddr(ptr) || 
+        pagedir_get_page(thread_current()->pagedir, ptr) == NULL) {
+        terminate(-1);
+    }
 }
 
 void validate_string(const char *str) {
