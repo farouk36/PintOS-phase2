@@ -160,7 +160,7 @@ static int
 sys_open(const char *file) {
   struct file *opened_file = filesys_open(file);
   struct open_file * new_file = malloc(sizeof(struct open_file));
-  if (opened_file == NULL) {
+  if (opened_file == NULL || new_file == NULL) {
     return -1;
   }
   int fd = thread_current()->fd_last++;
@@ -226,8 +226,12 @@ sys_write(int fd, const void *buffer, unsigned size) {
   
   // Handle stdout (fd = 1)
   if (fd == 1) {
+    lock_acquire(&filesys_lock);
     putbuf(buffer, size);
+    lock_release(&filesys_lock);
     return size;
+  }else if(fd==0){
+    return -1;
   }
   
   // Validate fd

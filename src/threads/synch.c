@@ -196,10 +196,6 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  struct locks_held *lock_held = malloc(sizeof(struct locks_held));
-  lock_held->lock = lock;
-  list_push_back(thread_current()->locks_held, &lock_held->elem);
-
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
 }
@@ -235,12 +231,6 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  for (struct list_elem *e = list_begin(thread_current()->locks_held); e != list_end(thread_current()->locks_held); e = list_next(e)) {
-    if (list_entry(e, struct locks_held, elem)->lock == lock) {
-      list_remove(e);
-      break;
-    }
-  }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }

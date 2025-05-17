@@ -91,16 +91,14 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
-    struct list *children;              /* List element for ready list. */
+    struct list children;              /* List element for ready list. */
     struct thread *parent;               /* Parent thread. */
-    bool child_creation_success;
-    struct semaphore *load_sema;       //  struct semaphore *load_sema;
-    struct semaphore *exit_sema;        // struct semaphore *exit_sema;
+    struct semaphore load_sema;        // struct semaphore *load_sema;
+    struct semaphore exit_sema;        // struct semaphore *exit_sema;
     tid_t waiting_on;
     int fd_last;
     struct file *fd_table[128];         /* File descriptor table. */
-    struct list *open_files;            /* List of open files. */
-    struct list *locks_held;
+    struct list open_files;            /* List of open files. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -121,10 +119,6 @@ struct thread
    struct list_elem elem; 
   };
 
-  struct locks_held{
-   struct lock* lock;
-   struct list_elem elem;
-  };
   struct open_file{
        int fd;
        struct file* file;

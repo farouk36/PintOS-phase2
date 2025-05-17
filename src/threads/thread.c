@@ -186,16 +186,6 @@ thread_create (const char *name, int priority,
 	tid = t->tid = allocate_tid ();
 	t->exit_status = -1;
 	t->status = THREAD_BLOCKED;  // Explicitly set initial status
-    
-	struct child_process *ch = palloc_get_page (PAL_ZERO);
-	if (ch == NULL) {
-		palloc_free_page (t);
-		return TID_ERROR;
-	}
-	ch->pid = tid;
-	ch->t = t;
-	list_push_back(&thread_current()->children, &ch->elem);  // Fix: add &ch->elem
-	ch->t->parent = thread_current();
 
 	/* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
@@ -308,6 +298,14 @@ thread_exit (void)
      when it calls thread_schedule_tail(). */
 	intr_disable ();
 	list_remove (&thread_current()->allelem);
+	/* Free all open files */
+	struct list_elem *e;
+	struct open_file *curFile;
+	for (e = list_begin(&thread_current()->open_files); e != list_end(&thread_current()->open_files); e = list_next(e)){
+		curFile = list_entry(e,struct open_file , elem);
+		file_close(curFile->file);
+	}
+
 	thread_current ()->status = THREAD_DYING;
 	schedule ();
 	NOT_REACHED ();
@@ -468,40 +466,32 @@ is_thread (struct thread *t)
 static void
 init_thread (struct thread *t, const char *name, int priority)
 {
-	enum intr_level old_level;
+    enum intr_level old_level;
 
-	ASSERT (t != NULL);
-	ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
-	ASSERT (name != NULL);
+    ASSERT (t != NULL);
+    ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
+    ASSERT (name != NULL);
 
-	memset (t, 0, sizeof *t);
-	t->status = THREAD_BLOCKED;
-	strlcpy (t->name, name, sizeof t->name);
-	t->stack = (uint8_t *) t + PGSIZE;
-	t->priority = priority;
-	t->magic = THREAD_MAGIC;
+    memset (t, 0, sizeof *t);
+    t->status = THREAD_BLOCKED;
+    strlcpy (t->name, name, sizeof t->name);
+    t->stack = (uint8_t *) t + PGSIZE;
+    t->priority = priority;
+    t->magic = THREAD_MAGIC;
 
-	t->parent = NULL;
-	t->children = malloc(sizeof(struct list));
-	list_init(t->children);
-	t->load_sema = malloc(sizeof(struct semaphore));
-	sema_init(t->load_sema, 0);
-	t->exit_sema = malloc(sizeof(struct semaphore));
-	sema_init(t->exit_sema, 0);
-	t->fd_last = 2; // Start after stdin/stdout
-	t->open_files = malloc(sizeof(struct list));
-	list_init(t->open_files);
-	t->locks_held = malloc(sizeof(struct list));
-	list_init(t->locks_held);
-	t->exit_status = -1;
-	t->waiting_on = -1;
+	list_init(&t->children);
+	list_init(&t->open_files);
+	sema_init(&t->load_sema, 0);
+	sema_init(&t->exit_sema, 0);
 
-	// Initialize file descriptor table
-	memset(t->fd_table, 0, sizeof(t->fd_table));
+    t->fd_last = 2;
+    t->exit_status = -1;
+    t->waiting_on = -1;
+    memset(t->fd_table, 0, sizeof(t->fd_table));
 
-	old_level = intr_disable ();
-	list_push_back (&all_list, &t->allelem);
-	intr_set_level (old_level);
+    old_level = intr_disable ();
+    list_push_back (&all_list, &t->allelem);
+    intr_set_level (old_level);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

@@ -68,7 +68,7 @@ process_execute (const char *file_name)
 	tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
 	struct thread *child_thread = get_Child(tid);
 	if(child_thread != NULL){
-		sema_down(child_thread->load_sema);
+		sema_down(&child_thread->load_sema);
 	}
 	
 	if (tid == TID_ERROR)
@@ -99,8 +99,7 @@ start_process (void *file_name_)
   
   // Signal parent about load result
   if (thread_current()->parent != NULL) {
-    thread_current()->parent->child_creation_success = success;
-    sema_up(thread_current()->load_sema);
+    sema_up(&thread_current()->load_sema);
   }
 
   /* If load failed, quit. */
@@ -147,7 +146,7 @@ process_wait (tid_t child_tid UNUSED)
   // Wait for child to exit
   cur->waiting_on = child_tid;
   struct thread *child_thread = get_Child(child_tid);
-  sema_down(child_thread->exit_sema);
+  sema_down(&child_thread->exit_sema);
   
   int status = child->t->exit_status;
   free(child);
@@ -163,23 +162,16 @@ process_exit (void)
   
   // Close all open files
   struct list_elem *e;
-  while (!list_empty(cur->open_files)) {
-    e = list_pop_front(cur->open_files);
+  while (!list_empty(&cur->open_files)) {
+    e = list_pop_front(&cur->open_files);
     struct open_file *of = list_entry(e, struct open_file, elem);
     file_close(of->file);
     free(of);
   }
   
-  // Free lists
-  free(cur->open_files);
-  free(cur->locks_held);
-  free(cur->children);
-  free(cur->load_sema);
-  free(cur->exit_sema);
-
   // Signal parent if it's waiting
   if (cur->parent != NULL && cur->parent->waiting_on == cur->tid) {
-    sema_up(cur->exit_sema);
+    sema_up(&cur->exit_sema);
   }
   
   uint32_t *pd;
