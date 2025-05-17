@@ -186,14 +186,14 @@ thread_create (const char *name, int priority,
 	tid = t->tid = allocate_tid ();
 
 
-    // connection parent && child //
-	struct child_process *child = palloc_get_page(PAL_ZERO);
-	if (child == NULL)
-		return TID_ERROR;
-	child->pid = tid;
-	child->t = t;
-	list_push_back(&thread_current()->children, &child->elem);
-	t->parent = thread_current();
+    // connection parent && child    //
+    struct child_process *child = malloc(sizeof(struct child_process));
+    if (child == NULL)
+        return TID_ERROR;
+    child->pid = tid;
+    child->t = t;
+    list_push_back(&thread_current()->children, &child->elem);
+    t->parent = thread_current();
 
 	/* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 

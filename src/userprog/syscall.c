@@ -274,26 +274,39 @@ sys_tell(int fd) {
 void 
 sys_close(int fd) {
   if (!validate_fd(fd)) {
-    terminate(-1);
+    // Just return if fd is invalid, do not terminate to avoid recursion
+    return;
   }
-  
-  struct file *file = thread_current()->fd_table[fd];
+  struct thread *cur = thread_current();
+  struct file *file = cur->fd_table[fd];
   lock_acquire(&filesys_lock);
   file_close(file);
   lock_release(&filesys_lock);
-  thread_current()->fd_table[fd] = NULL;
+  cur->fd_table[fd] = NULL;
+
+  // Remove from open_files list and free the struct
+  struct list_elem *e;
+  for (e = list_begin(&cur->open_files); e != list_end(&cur->open_files); e = list_next(e)) {
+    struct open_file *of = list_entry(e, struct open_file, elem);
+    if (of->fd == fd) {
+      list_remove(e);
+      free(of);
+      break;
+    }
+  }
 }
 
 void terminate(int status){
   struct thread *cur = thread_current();
-  cur->parent->exit_status = status;
+  cur->exit_status = status;
   printf("%s: exit(%d)\n", cur->name, status);
-  struct list_elem * e ;
-	struct open_file * curFile ;
-    for (e = list_begin(&thread_current()->open_files); e != list_end(&thread_current()->open_files); e = list_next(e)){
-        curFile = list_entry(e,struct open_file , elem);
-		sys_close(curFile->fd);
-	}
+  // Close all open files and free open_file structs
+  while (!list_empty(&cur->open_files)) {
+    struct list_elem *e = list_pop_front(&cur->open_files);
+    struct open_file *of = list_entry(e, struct open_file, elem);
+    sys_close(of->fd); // This will also free the struct
+    // No need to free(of) here, already freed in sys_close
+  }
   thread_exit();
 }
 
