@@ -30,7 +30,7 @@ static int sys_write(int fd, const void *buffer, unsigned size);
 static void sys_seek(int fd, unsigned position);
 static unsigned sys_tell(int fd);
 static void sys_close(int fd);
-
+int get_arg_int(void *esp, int offset);
 
 
 static void syscall_handler (struct intr_frame *);
@@ -65,10 +65,11 @@ syscall_handler (struct intr_frame *f)
     case SYS_HALT:
       sys_halt();
       break;
-    case SYS_EXIT:
-      get_arguments(f, args, 1);
-      sys_exit(*(int*)args[0]);
+    case SYS_EXIT:{
+     int status = get_arg_int(f->esp, 4);
+     sys_exit(status);
       break;
+    }
     case SYS_EXEC:
       get_arguments(f, args, 1);
       validate_string((const char *)args[0]);
@@ -332,4 +333,11 @@ validate_fd(int fd) {
     return false;
   }
   return true;
+}
+int get_arg_int(void *esp, int offset) {
+    uint8_t *addr = (uint8_t *) esp + offset;
+    for (int i = 0; i < 4; i++) {
+        validate_ptr(addr + i);
+    }
+    return *(int *) addr;
 }
